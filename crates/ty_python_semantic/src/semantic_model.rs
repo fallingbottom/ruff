@@ -304,6 +304,14 @@ pub trait HasType {
     fn inferred_type<'db>(&self, model: &SemanticModel<'db>) -> Type<'db>;
 }
 
+pub trait IsStringAnnotation {
+    /// Returns the inferred type of `self`.
+    ///
+    /// ## Panics
+    /// May panic if `self` is from another file than `model`.
+    fn is_string_annotation(&self, model: &SemanticModel) -> bool;
+}
+
 pub trait HasDefinition {
     /// Returns the inferred type of `self`.
     ///
@@ -319,6 +327,16 @@ impl HasType for ast::ExprRef<'_> {
         let scope = file_scope.to_scope_id(model.db, model.file);
 
         infer_scope_types(model.db, scope).expression_type(*self)
+    }
+}
+
+impl IsStringAnnotation for ast::ExprRef<'_> {
+    fn is_string_annotation(&self, model: &SemanticModel) -> bool {
+        let index = semantic_index(model.db, model.file);
+        let file_scope = index.expression_scope_id(self);
+        let scope = file_scope.to_scope_id(model.db, model.file);
+
+        infer_scope_types(model.db, scope).is_string_annotation(*self)
     }
 }
 

@@ -39,7 +39,7 @@
 use ruff_db::parsed::{ParsedModuleRef, parsed_module};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use salsa;
 use salsa::plumbing::AsId;
 
@@ -554,6 +554,7 @@ pub(crate) struct ScopeInference<'db> {
 
 #[derive(Debug, Eq, PartialEq, get_size2::GetSize, salsa::Update, Default)]
 struct ScopeInferenceExtra<'db> {
+    string_annotations: FxHashSet<ExpressionNodeKey>,
     /// Is this a cycle-recovery inference result, and if so, what kind?
     cycle_recovery: Option<CycleRecovery<'db>>,
 
@@ -598,6 +599,14 @@ impl<'db> ScopeInference<'db> {
             .as_ref()
             .and_then(|extra| extra.cycle_recovery.map(CycleRecovery::fallback_type))
     }
+
+    pub(crate) fn is_string_annotation(&self, expression: impl Into<ExpressionNodeKey>) -> bool {
+        let Some(extra) = &self.extra else {
+            return false;
+        };
+
+        extra.string_annotations.contains(&expression.into())
+    }
 }
 
 /// The inferred types for a definition region.
@@ -637,6 +646,8 @@ struct DefinitionInferenceExtra<'db> {
 
     /// The diagnostics for this region.
     diagnostics: TypeCheckDiagnostics,
+
+    string_annotations: FxHashSet<ExpressionNodeKey>,
 
     /// For function definitions, the undecorated type of the function.
     undecorated_type: Option<Type<'db>>,
@@ -772,6 +783,8 @@ struct ExpressionInferenceExtra<'db> {
 
     /// The diagnostics for this region.
     diagnostics: TypeCheckDiagnostics,
+
+    string_annotations: FxHashSet<ExpressionNodeKey>,
 
     /// Is this a cycle recovery inference result, and if so, what kind?
     cycle_recovery: Option<CycleRecovery<'db>>,

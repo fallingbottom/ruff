@@ -22,7 +22,8 @@ pub use program::{
 pub use python_platform::PythonPlatform;
 use rustc_hash::FxHasher;
 pub use semantic_model::{
-    Completion, HasDefinition, HasType, MemberDefinition, NameKind, SemanticModel,
+    Completion, HasDefinition, HasType, IsStringAnnotation, MemberDefinition, NameKind,
+    SemanticModel,
 };
 pub use site_packages::{PythonEnvironment, SitePackagesPaths, SysPrefixPathOrigin};
 pub use types::DisplaySettings;

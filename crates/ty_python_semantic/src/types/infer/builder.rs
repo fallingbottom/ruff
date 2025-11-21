@@ -220,6 +220,9 @@ pub(super) struct TypeInferenceBuilder<'db, 'ast> {
     /// The types of every expression in this region.
     expressions: FxHashMap<ExpressionNodeKey, Type<'db>>,
 
+    /// Expressions that are actually string annotations
+    string_annotations: FxHashSet<ExpressionNodeKey>,
+
     /// The scope this region is part of.
     scope: ScopeId<'db>,
 
@@ -325,6 +328,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             deferred_state: DeferredExpressionState::None,
             multi_inference_state: MultiInferenceState::Panic,
             expressions: FxHashMap::default(),
+            string_annotations: FxHashSet::default(),
             bindings: VecMap::default(),
             declarations: VecMap::default(),
             typevar_binding_context: None,
@@ -11685,6 +11689,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         let Self {
             context,
             mut expressions,
+            string_annotations,
             scope,
             bindings,
             declarations,
@@ -11719,7 +11724,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         );
 
         let extra =
-            (cycle_recovery.is_some() || !bindings.is_empty() || !diagnostics.is_empty() || !all_definitely_bound).then(|| {
+            (!string_annotations.is_empty() || cycle_recovery.is_some() || !bindings.is_empty() || !diagnostics.is_empty() || !all_definitely_bound).then(|| {
                 if bindings.len() > 20 {
                     tracing::debug!(
                         "Inferred expression region `{:?}` contains {} bindings. Lookups by linear scan might be slow.",
@@ -11729,6 +11734,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                 }
 
                 Box::new(ExpressionInferenceExtra {
+                    string_annotations,
                     bindings: bindings.into_boxed_slice(),
                     diagnostics,
                     cycle_recovery,
@@ -11752,6 +11758,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         let Self {
             context,
             mut expressions,
+            string_annotations,
             scope,
             bindings,
             declarations,
@@ -11774,11 +11781,13 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         let diagnostics = context.finish();
 
         let extra = (!diagnostics.is_empty()
+            || !string_annotations.is_empty()
             || cycle_recovery.is_some()
             || undecorated_type.is_some()
             || !deferred.is_empty())
         .then(|| {
             Box::new(DefinitionInferenceExtra {
+                string_annotations,
                 cycle_recovery,
                 deferred: deferred.into_boxed_slice(),
                 diagnostics,
@@ -11819,6 +11828,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
         let Self {
             context,
+            string_annotations,
             mut expressions,
             scope,
             cycle_recovery,
@@ -11846,12 +11856,15 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         let _ = scope;
         let diagnostics = context.finish();
 
-        let extra = (!diagnostics.is_empty() || cycle_recovery.is_some()).then(|| {
-            Box::new(ScopeInferenceExtra {
-                cycle_recovery,
-                diagnostics,
-            })
-        });
+        let extra =
+            (!string_annotations.is_empty() || !diagnostics.is_empty() || cycle_recovery.is_some())
+                .then(|| {
+                    Box::new(ScopeInferenceExtra {
+                        string_annotations,
+                        cycle_recovery,
+                        diagnostics,
+                    })
+                });
 
         expressions.shrink_to_fit();
 
