@@ -328,7 +328,6 @@ impl GotoTarget<'_> {
             | GotoTarget::TypeParamTypeVarTupleName(_)
             | GotoTarget::NonLocal { .. }
             | GotoTarget::Globals { .. } => return None,
-            // TODO: Support string annotation subexpressions
             GotoTarget::StringAnnotationSubexpr {
                 string_expr,
                 subrange,
@@ -342,6 +341,8 @@ impl GotoTarget<'_> {
                 if AnyNodeRef::from(&*submod.body) == subnode {
                     string_expr.inferred_type(model)
                 } else {
+                    // TODO: force the typechecker to tell us its secrets
+                    // (it computes but then immediately discards these types)
                     return None;
                 }
             }
