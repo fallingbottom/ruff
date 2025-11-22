@@ -194,6 +194,7 @@ pub(crate) enum GotoTarget<'a> {
     StringAnnotationSubexpr {
         string_expr: &'a ast::ExprStringLiteral,
         subrange: TextRange,
+        name: Option<String>,
     },
 }
 
@@ -327,21 +328,29 @@ impl GotoTarget<'_> {
             | GotoTarget::TypeParamTypeVarTupleName(_)
             | GotoTarget::NonLocal { .. }
             | GotoTarget::Globals { .. } => return None,
+            // TODO: Support string annotation subexpressions
             GotoTarget::StringAnnotationSubexpr {
                 string_expr,
                 subrange,
+                ..
             } => {
-                let (subast, submodel) = model.enter_string_annotation(string_expr)?;
-                return None;
+                let (subast, _submodel) = model.enter_string_annotation(string_expr)?;
+                let submod = subast.syntax();
+                let subnode = covering_node(submod.into(), *subrange).node();
+
+                // The type checker knows the type of the full annotation but nothing else
+                if AnyNodeRef::from(&*submod.body) == subnode {
+                    string_expr.inferred_type(model)
+                } else {
+                    return None;
+                }
             }
             GotoTarget::BinOp { expression, .. } => {
-                let (_, ty) =
-                    ty_python_semantic::definitions_for_bin_op(model.db(), model, expression)?;
+                let (_, ty) = ty_python_semantic::definitions_for_bin_op(model, expression)?;
                 ty
             }
             GotoTarget::UnaryOp { expression, .. } => {
-                let (_, ty) =
-                    ty_python_semantic::definitions_for_unary_op(model.db(), model, expression)?;
+                let (_, ty) = ty_python_semantic::definitions_for_unary_op(model, expression)?;
                 ty
             }
         };
@@ -355,7 +364,7 @@ impl GotoTarget<'_> {
         model: &SemanticModel,
     ) -> Option<String> {
         if let GotoTarget::Call { call, .. } = self {
-            call_type_simplified_by_overloads(model.db(), model, call)
+            call_type_simplified_by_overloads(model, call)
         } else {
             None
         }
@@ -379,9 +388,6 @@ impl GotoTarget<'_> {
         alias_resolution: ImportAliasResolution,
     ) -> Option<DefinitionsOrTargets<'db>> {
         use crate::NavigationTarget;
-        let db = model.db();
-        let file = model.file();
-
         match self {
             GotoTarget::Expression(expression) => {
                 definitions_for_expression(model, expression).map(DefinitionsOrTargets::Definitions)
@@ -401,8 +407,7 @@ impl GotoTarget<'_> {
                 let symbol_name = alias.name.as_str();
                 Some(DefinitionsOrTargets::Definitions(
                     definitions_for_imported_symbol(
-                        db,
-                        file,
+                        model,
                         import_from,
                         symbol_name,
                         alias_resolution,
@@ -426,7 +431,7 @@ impl GotoTarget<'_> {
                     let alias_range = alias.asname.as_ref().unwrap().range;
                     Some(DefinitionsOrTargets::Targets(
                         crate::NavigationTargets::single(NavigationTarget {
-                            file,
+                            file: model.file(),
                             focus_range: alias_range,
                             full_range: alias.range(),
                         }),
@@ -437,7 +442,7 @@ impl GotoTarget<'_> {
                 keyword,
                 call_expression,
             } => Some(DefinitionsOrTargets::Definitions(
-                definitions_for_keyword_argument(db, file, keyword, call_expression),
+                definitions_for_keyword_argument(model, keyword, call_expression),
             )),
             GotoTarget::ExceptVariable(except_handler) => {
                 Some(DefinitionsOrTargets::Definitions(vec![
@@ -448,7 +453,10 @@ impl GotoTarget<'_> {
                 if let Some(rest_name) = &pattern_mapping.rest {
                     let range = rest_name.range;
                     Some(DefinitionsOrTargets::Targets(
-                        crate::NavigationTargets::single(NavigationTarget::new(file, range)),
+                        crate::NavigationTargets::single(NavigationTarget::new(
+                            model.file(),
+                            range,
+                        )),
                     ))
                 } else {
                     None
@@ -458,7 +466,10 @@ impl GotoTarget<'_> {
                 if let Some(name) = &pattern_as.name {
                     let range = name.range;
                     Some(DefinitionsOrTargets::Targets(
-                        crate::NavigationTargets::single(NavigationTarget::new(file, range)),
+                        crate::NavigationTargets::single(NavigationTarget::new(
+                            model.file(),
+                            range,
+                        )),
                     ))
                 } else {
                     None
@@ -478,19 +489,20 @@ impl GotoTarget<'_> {
             }
             GotoTarget::BinOp { expression, .. } => {
                 let (definitions, _) =
-                    ty_python_semantic::definitions_for_bin_op(db, model, expression)?;
+                    ty_python_semantic::definitions_for_bin_op(model, expression)?;
 
                 Some(DefinitionsOrTargets::Definitions(definitions))
             }
             GotoTarget::UnaryOp { expression, .. } => {
                 let (definitions, _) =
-                    ty_python_semantic::definitions_for_unary_op(db, model, expression)?;
+                    ty_python_semantic::definitions_for_unary_op(model, expression)?;
 
                 Some(DefinitionsOrTargets::Definitions(definitions))
             }
             GotoTarget::StringAnnotationSubexpr {
                 string_expr,
                 subrange,
+                ..
             } => {
                 let (subast, submodel) = model.enter_string_annotation(string_expr)?;
                 let subexpr = covering_node(subast.syntax().into(), *subrange)
@@ -524,10 +536,7 @@ impl GotoTarget<'_> {
                 ast::ExprRef::Attribute(attr) => Some(Cow::Borrowed(attr.attr.as_str())),
                 _ => None,
             },
-            GotoTarget::StringAnnotationSubexpr {
-                string_expr,
-                subrange,
-            } => None,
+            GotoTarget::StringAnnotationSubexpr { name, .. } => name.as_deref().map(Cow::Borrowed),
             GotoTarget::FunctionDef(function) => Some(Cow::Borrowed(function.name.as_str())),
             GotoTarget::ClassDef(class) => Some(Cow::Borrowed(class.name.as_str())),
             GotoTarget::Parameter(parameter) => Some(Cow::Borrowed(parameter.name.as_str())),
@@ -790,16 +799,22 @@ impl GotoTarget<'_> {
 
             node @ AnyNodeRef::ExprStringLiteral(string_expr) => {
                 if let Some((subast, submodel)) = model.enter_string_annotation(string_expr)
-                    && let Some(GotoTarget::Expression(expr)) = find_goto_target_impl(
+                    && let Some(GotoTarget::Expression(subexpr)) = find_goto_target_impl(
                         &submodel,
                         subast.tokens(),
                         subast.syntax().into(),
                         offset,
                     )
                 {
+                    let name = match subexpr {
+                        ast::ExprRef::Name(name) => Some(name.id.to_string()),
+                        ast::ExprRef::Attribute(attr) => Some(attr.attr.to_string()),
+                        _ => None,
+                    };
                     Some(GotoTarget::StringAnnotationSubexpr {
                         string_expr,
-                        subrange: expr.range(),
+                        subrange: subexpr.range(),
+                        name,
                     })
                 } else {
                     node.as_expr_ref().map(GotoTarget::Expression)
@@ -903,9 +918,7 @@ fn definitions_for_expression<'db>(
     match expression {
         ast::ExprRef::Name(name) => Some(definitions_for_name(model, name)),
         ast::ExprRef::Attribute(attribute) => Some(ty_python_semantic::definitions_for_attribute(
-            model.db(),
-            model.file(),
-            attribute,
+            model, attribute,
         )),
         _ => None,
     }
@@ -916,7 +929,7 @@ fn definitions_for_callable<'db>(
     call: &ast::ExprCall,
 ) -> Vec<ResolvedDefinition<'db>> {
     // Attempt to refine to a specific call
-    let signature_info = call_signature_details(model.db(), model, call);
+    let signature_info = call_signature_details(model, call);
     signature_info
         .into_iter()
         .filter_map(|signature| signature.definition.map(ResolvedDefinition::Definition))
