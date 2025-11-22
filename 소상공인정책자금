@@ -1,0 +1,34 @@
+This XML file does not appear to have any style information associated with it. The document tree is shown below.
+<rdf:RDF xmlns:foaf="http://xmlns.com/foaf/0.1/" xmlns:dct="http://purl.org/dc/terms/" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dcat="http://www.w3.org/ns/dcat#" xmlns:vcard="http://www.w3.org/2006/vcard/ns#">
+<dcat:Catalog>
+<dcat:service>
+<dcat:DataService>
+<dcat:contactPoint>
+<vcard:Organization>
+<vcard:organization-unit>디지털금융부</vcard:organization-unit>
+<vcard:hasTelephone rdf:resource="02-787-4853"/>
+</vcard:Organization>
+</dcat:contactPoint>
+<dct:description>한국산업은행 기금대출(국가정책사업의 원활한 수행을 위해 정부 등이 조성한 기금을 한국산업은행이 차입하여 실수요자에게 대출하는 제도) 정보제공(2020년도 이후 데이터 제공) 데이터이며, 현재 취급하고 있는 상품은 가스안전관리기금, 고용환경개선자금, 관광진흥개발기금, 녹색전환분야자금, 도시가스공급배관자금, 산업재해예방기금, 석유저장시설 안전관리기금, 소상공인시장진흥기금, 에너지이용합리화자금, 정보통신진흥기금, 중소벤처기업창업 및 진흥기금, 지방중소기업육성자금, 청정대기분야자금, 축산발전기금, 친환경설비투자기금, 탄소중립전환선도기금, 특정물질사용 합리화기금, 폐광지역대체산업육성자금, 환경산업분야자금 등이 있습니다. 대출기간 및 지원부분은 기금 종류별로 상이합니다.</dct:description>
+<dct:title>한국산업은행_기금대출 정보</dct:title>
+<dct:issued rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2020-06-09</dct:issued>
+<dct:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2025-07-09</dct:modified>
+<dct:publisher>
+<foaf:Organization>
+<foaf:name>한국산업은행</foaf:name>
+</foaf:Organization>
+</dct:publisher>
+<dcat:format>XML</dcat:format>
+<dcat:theme>재정·세제·금융 - 금융</dcat:theme>
+<dcat:keyword>한국산업은행,금융상품,기금대출,관광진흥기금,지방중소기업육성자금,석유저장시설안전관리기금,청정대기분야자금</dcat:keyword>
+<dcat:keyword>Industrial Bank of Korea,Financial products,Fund Loan,Tourism Promotion Fund,Local Small and Medium Business Promotion Fund,Petroleum Storage Facility Safety Management Fund,Clean Air Fund</dcat:keyword>
+<dct:rights>이용허락범위 제한 없음</dct:rights>
+<dcat:landingPage rdf:resource="https://www.data.go.kr/data/15060633/openapi.do"/>
+<dcat:endpointURL/>
+<dcat:accessURL/>
+<dct:spatial/>
+<dct:temporal/>
+</dcat:DataService>
+</dcat:service>
+</dcat:Catalog>
+</rdf:RDF
