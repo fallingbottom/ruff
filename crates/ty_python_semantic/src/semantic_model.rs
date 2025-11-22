@@ -31,20 +31,6 @@ impl<'db> SemanticModel<'db> {
         }
     }
 
-    pub fn with_string_annotation<'a>(
-        &self,
-        string_expr: &'a ExprStringLiteral,
-    ) -> SemanticModel<'a>
-    where
-        'db: 'a,
-    {
-        Self {
-            db: self.db,
-            file: self.file,
-            in_string_annotation_expr: Some(Box::new(Expr::StringLiteral(string_expr.clone()))),
-        }
-    }
-
     // TODO we don't actually want to expose the Db directly to lint rules, but we need to find a
     // solution for exposing information from types
     pub fn db(&self) -> &'db dyn Db {
@@ -271,10 +257,10 @@ impl<'db> SemanticModel<'db> {
         }
     }
 
-    pub fn enter_string_annotation<'a>(
-        &'a self,
-        string_expr: &'a ExprStringLiteral,
-    ) -> Option<(Parsed<ModExpression>, SemanticModel<'a>)> {
+    pub fn enter_string_annotation(
+        &self,
+        string_expr: &ExprStringLiteral,
+    ) -> Option<(Parsed<ModExpression>, Self)> {
         // Must be a string annotation
         if !ExprRef::StringLiteral(string_expr).is_string_annotation(self) {
             return None;
@@ -289,7 +275,12 @@ impl<'db> SemanticModel<'db> {
         let string_literal = string_expr.as_single_part_string()?;
         let ast =
             ruff_python_parser::parse_string_annotation(source.as_str(), string_literal).ok()?;
-        Some((ast, self.with_string_annotation(string_expr)))
+        let model = Self {
+            db: self.db,
+            file: self.file,
+            in_string_annotation_expr: Some(Box::new(Expr::StringLiteral(string_expr.clone()))),
+        };
+        Some((ast, model))
     }
 }
 
