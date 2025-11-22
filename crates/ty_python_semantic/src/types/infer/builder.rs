@@ -369,6 +369,8 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
             self.context.extend(&extra.diagnostics);
             self.deferred
                 .extend(extra.deferred.iter().copied(), self.multi_inference_state);
+            self.string_annotations
+                .extend(extra.string_annotations.iter().copied());
         }
     }
 
@@ -385,6 +387,8 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         if let Some(extra) = &inference.extra {
             self.context.extend(&extra.diagnostics);
             self.extend_cycle_recovery(extra.cycle_recovery);
+            self.string_annotations
+                .extend(extra.string_annotations.iter().copied());
 
             if !matches!(self.region, InferenceRegion::Scope(..)) {
                 self.bindings

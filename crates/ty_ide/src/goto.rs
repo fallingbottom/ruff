@@ -872,7 +872,7 @@ fn definitions_for_expression<'db>(
     expression: &ruff_python_ast::ExprRef<'_>,
 ) -> Option<Vec<ResolvedDefinition<'db>>> {
     match expression {
-        ast::ExprRef::Name(name) => Some(definitions_for_name(model.db(), model.file(), name)),
+        ast::ExprRef::Name(name) => Some(definitions_for_name(model, name)),
         ast::ExprRef::Attribute(attribute) => Some(ty_python_semantic::definitions_for_attribute(
             model.db(),
             model.file(),

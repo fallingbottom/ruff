@@ -37,16 +37,18 @@ use bitflags::bitflags;
 use itertools::Itertools;
 use ruff_db::files::File;
 use ruff_db::parsed::parsed_module;
-use ruff_python_ast as ast;
+use ruff_db::source::source_text;
 use ruff_python_ast::visitor::source_order::{
     SourceOrderVisitor, TraversalSignal, walk_expr, walk_stmt,
 };
+use ruff_python_ast::{self as ast, ExprRef};
 use ruff_python_ast::{
     AnyNodeRef, BytesLiteral, Expr, FString, InterpolatedStringElement, Stmt, StringLiteral,
     TypeParam,
 };
 use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
 use std::ops::Deref;
+use ty_python_semantic::IsStringAnnotation;
 use ty_python_semantic::semantic_index::definition::Definition;
 use ty_python_semantic::types::TypeVarKind;
 use ty_python_semantic::{
@@ -189,7 +191,7 @@ pub fn semantic_tokens(db: &dyn Db, file: File, range: Option<TextRange>) -> Sem
     let parsed = parsed_module(db, file).load(db);
     let semantic_model = SemanticModel::new(db, file);
 
-    let mut visitor = SemanticTokenVisitor::new(&semantic_model, file, range);
+    let mut visitor = SemanticTokenVisitor::new(&semantic_model, range);
     visitor.visit_body(parsed.suite());
 
     SemanticTokens::new(visitor.tokens)
@@ -198,7 +200,6 @@ pub fn semantic_tokens(db: &dyn Db, file: File, range: Option<TextRange>) -> Sem
 /// AST visitor that collects semantic tokens.
 struct SemanticTokenVisitor<'db> {
     semantic_model: &'db SemanticModel<'db>,
-    file: File,
     tokens: Vec<SemanticToken>,
     in_class_scope: bool,
     in_type_annotation: bool,
@@ -207,14 +208,9 @@ struct SemanticTokenVisitor<'db> {
 }
 
 impl<'db> SemanticTokenVisitor<'db> {
-    fn new(
-        semantic_model: &'db SemanticModel<'db>,
-        file: File,
-        range_filter: Option<TextRange>,
-    ) -> Self {
+    fn new(semantic_model: &'db SemanticModel<'db>, range_filter: Option<TextRange>) -> Self {
         Self {
             semantic_model,
-            file,
             tokens: Vec::new(),
             in_class_scope: false,
             in_target_creating_definition: false,
@@ -265,7 +261,7 @@ impl<'db> SemanticTokenVisitor<'db> {
 
     fn classify_name(&self, name: &ast::ExprName) -> (SemanticTokenType, SemanticTokenModifier) {
         // First try to classify the token based on its definition kind.
-        let definition = definition_for_name(self.semantic_model.db(), self.file, name);
+        let definition = definition_for_name(self.semantic_model, name);
 
         if let Some(definition) = definition {
             let name_str = name.id.as_str();
@@ -880,6 +876,24 @@ impl SourceOrderVisitor<'_> for SemanticTokenVisitor<'_> {
                 self.in_target_creating_definition = prev_in_target;
 
                 self.visit_expr(&named.value);
+            }
+            ast::Expr::StringLiteral(string_expr) => {
+                if ExprRef::from(expr).is_string_annotation(self.semantic_model) {
+                    let source = source_text(self.semantic_model.db(), self.semantic_model.file());
+                    if let Some(string_literal) = string_expr.as_single_part_string()
+                        && let Ok(sub_ast) = ruff_python_parser::parse_string_annotation(
+                            source.as_str(),
+                            string_literal,
+                        )
+                    {
+                        let sub_model = self.semantic_model.with_string_annotation(expr);
+                        let mut sub_visitor = SemanticTokenVisitor::new(&sub_model, None);
+                        sub_visitor.visit_expr(sub_ast.expr());
+                        self.tokens.extend(sub_visitor.tokens);
+                    }
+                } else {
+                    walk_expr(self, expr);
+                }
             }
             _ => {
                 // For all other expression types, let the default visitor handle them
@@ -1561,6 +1575,44 @@ from mymodule import CONSTANT, my_function, MyClass
         "CONSTANT" @ 140..148: Variable [readonly]
         "my_function" @ 150..161: Variable
         "MyClass" @ 163..170: Variable
+        "#);
+    }
+
+    #[test]
+    fn test_str_annotation() {
+        let test = SemanticTokenTest::new(
+            r#"
+x: int = 1
+y: "int" = 1
+z = "int"
+w1: "int | str" = "hello"
+w2: "int | sr" = "hello"
+w3: "int | " = "hello"
+"#,
+        );
+
+        let tokens = test.highlight_file();
+
+        assert_snapshot!(test.to_snapshot(&tokens), @r#"
+        "x" @ 1..2: Variable [definition]
+        "int" @ 4..7: Class
+        "1" @ 10..11: Number
+        "y" @ 12..13: Variable [definition]
+        "int" @ 16..19: Class
+        "1" @ 23..24: Number
+        "z" @ 25..26: Variable [definition]
+        "\"int\"" @ 29..34: String
+        "w1" @ 35..37: Variable [definition]
+        "int" @ 40..43: Class
+        "str" @ 46..49: Class
+        "\"hello\"" @ 53..60: String
+        "w2" @ 61..63: Variable [definition]
+        "int" @ 66..69: Class
+        "sr" @ 72..74: Variable
+        "\"hello\"" @ 78..85: String
+        "w3" @ 86..88: Variable [definition]
+        "\"int | \"" @ 90..98: String
+        "\"hello\"" @ 101..108: String
         "#);
     }
 

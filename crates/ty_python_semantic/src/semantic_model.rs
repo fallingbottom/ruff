@@ -18,11 +18,27 @@ use crate::types::{Type, binding_type, infer_scope_types};
 pub struct SemanticModel<'db> {
     db: &'db dyn Db,
     file: File,
+    in_string_annotation_expr: Option<Expr>,
 }
 
 impl<'db> SemanticModel<'db> {
     pub fn new(db: &'db dyn Db, file: File) -> Self {
-        Self { db, file }
+        Self {
+            db,
+            file,
+            in_string_annotation_expr: None,
+        }
+    }
+
+    pub fn with_string_annotation<'a>(&self, string_expr: &'a Expr) -> SemanticModel<'a>
+    where
+        'db: 'a,
+    {
+        Self {
+            db: self.db,
+            file: self.file,
+            in_string_annotation_expr: Some(string_expr.clone()),
+        }
     }
 
     // TODO we don't actually want to expose the Db directly to lint rules, but we need to find a
@@ -213,10 +229,9 @@ impl<'db> SemanticModel<'db> {
         completions
     }
 
-    fn scope(&self, node: ast::AnyNodeRef<'_>) -> Option<FileScopeId> {
+    pub fn scope(&self, node: ast::AnyNodeRef<'_>) -> Option<FileScopeId> {
         let index = semantic_index(self.db, self.file);
-
-        match node {
+        match self.node_in_ast(node) {
             ast::AnyNodeRef::Identifier(identifier) => index.try_expression_scope_id(identifier),
             node => match node.as_expr_ref() {
                 // If we couldn't identify a specific
@@ -225,6 +240,30 @@ impl<'db> SemanticModel<'db> {
                 None => Some(FileScopeId::global()),
                 Some(expr) => index.try_expression_scope_id(&expr),
             },
+        }
+    }
+
+    pub fn node_in_ast<'a>(&'a self, node: ast::AnyNodeRef<'a>) -> ast::AnyNodeRef<'a> {
+        if let Some(string_annotation) = &self.in_string_annotation_expr {
+            string_annotation.into()
+        } else {
+            node
+        }
+    }
+
+    pub fn expr_in_ast<'a>(&'a self, expr: &'a Expr) -> &'a Expr {
+        if let Some(string_annotation) = &self.in_string_annotation_expr {
+            string_annotation
+        } else {
+            expr
+        }
+    }
+
+    pub fn expr_ref_in_ast<'a>(&'a self, expr: ExprRef<'a>) -> ExprRef<'a> {
+        if let Some(string_annotation) = &self.in_string_annotation_expr {
+            ExprRef::from(string_annotation)
+        } else {
+            expr
         }
     }
 }
@@ -323,7 +362,7 @@ pub trait HasDefinition {
 impl HasType for ast::ExprRef<'_> {
     fn inferred_type<'db>(&self, model: &SemanticModel<'db>) -> Type<'db> {
         let index = semantic_index(model.db, model.file);
-        let file_scope = index.expression_scope_id(self);
+        let file_scope = index.expression_scope_id(&model.expr_ref_in_ast(*self));
         let scope = file_scope.to_scope_id(model.db, model.file);
 
         infer_scope_types(model.db, scope).expression_type(*self)
@@ -332,6 +371,9 @@ impl HasType for ast::ExprRef<'_> {
 
 impl IsStringAnnotation for ast::ExprRef<'_> {
     fn is_string_annotation(&self, model: &SemanticModel) -> bool {
+        if model.in_string_annotation_expr.is_some() {
+            return false;
+        }
         let index = semantic_index(model.db, model.file);
         let file_scope = index.expression_scope_id(self);
         let scope = file_scope.to_scope_id(model.db, model.file);
