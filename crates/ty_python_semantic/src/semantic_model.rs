@@ -1,7 +1,8 @@
 use ruff_db::files::{File, FilePath};
-use ruff_db::source::line_index;
-use ruff_python_ast as ast;
+use ruff_db::source::{line_index, source_text};
+use ruff_python_ast::{self as ast, ExprStringLiteral, ModExpression};
 use ruff_python_ast::{Expr, ExprRef, HasNodeIndex, name::Name};
+use ruff_python_parser::Parsed;
 use ruff_source_file::LineIndex;
 use rustc_hash::FxHashMap;
 
@@ -18,7 +19,7 @@ use crate::types::{Type, binding_type, infer_scope_types};
 pub struct SemanticModel<'db> {
     db: &'db dyn Db,
     file: File,
-    in_string_annotation_expr: Option<Expr>,
+    in_string_annotation_expr: Option<Box<Expr>>,
 }
 
 impl<'db> SemanticModel<'db> {
@@ -30,14 +31,17 @@ impl<'db> SemanticModel<'db> {
         }
     }
 
-    pub fn with_string_annotation<'a>(&self, string_expr: &'a Expr) -> SemanticModel<'a>
+    pub fn with_string_annotation<'a>(
+        &self,
+        string_expr: &'a ExprStringLiteral,
+    ) -> SemanticModel<'a>
     where
         'db: 'a,
     {
         Self {
             db: self.db,
             file: self.file,
-            in_string_annotation_expr: Some(string_expr.clone()),
+            in_string_annotation_expr: Some(Box::new(Expr::StringLiteral(string_expr.clone()))),
         }
     }
 
@@ -245,7 +249,7 @@ impl<'db> SemanticModel<'db> {
 
     pub fn node_in_ast<'a>(&'a self, node: ast::AnyNodeRef<'a>) -> ast::AnyNodeRef<'a> {
         if let Some(string_annotation) = &self.in_string_annotation_expr {
-            string_annotation.into()
+            (&**string_annotation).into()
         } else {
             node
         }
@@ -265,6 +269,27 @@ impl<'db> SemanticModel<'db> {
         } else {
             expr
         }
+    }
+
+    pub fn enter_string_annotation<'a>(
+        &'a self,
+        string_expr: &'a ExprStringLiteral,
+    ) -> Option<(Parsed<ModExpression>, SemanticModel<'a>)> {
+        // Must be a string annotation
+        if !ExprRef::StringLiteral(string_expr).is_string_annotation(self) {
+            return None;
+        }
+
+        // Parse the sub-AST and create a semantic model that knows it's in a sub-AST
+        //
+        // The string_annotation will be used as the expr/node for any query that needs
+        // to look up a node in the AST to prevent panics, because these sub-AST nodes
+        // are not in the File's AST!
+        let source = source_text(self.db, self.file);
+        let string_literal = string_expr.as_single_part_string()?;
+        let ast =
+            ruff_python_parser::parse_string_annotation(source.as_str(), string_literal).ok()?;
+        Some((ast, self.with_string_annotation(string_expr)))
     }
 }
 

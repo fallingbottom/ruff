@@ -37,18 +37,16 @@ use bitflags::bitflags;
 use itertools::Itertools;
 use ruff_db::files::File;
 use ruff_db::parsed::parsed_module;
-use ruff_db::source::source_text;
+use ruff_python_ast as ast;
 use ruff_python_ast::visitor::source_order::{
     SourceOrderVisitor, TraversalSignal, walk_expr, walk_stmt,
 };
-use ruff_python_ast::{self as ast, ExprRef};
 use ruff_python_ast::{
     AnyNodeRef, BytesLiteral, Expr, FString, InterpolatedStringElement, Stmt, StringLiteral,
     TypeParam,
 };
 use ruff_text_size::{Ranged, TextLen, TextRange, TextSize};
 use std::ops::Deref;
-use ty_python_semantic::IsStringAnnotation;
 use ty_python_semantic::semantic_index::definition::Definition;
 use ty_python_semantic::types::TypeVarKind;
 use ty_python_semantic::{
@@ -878,19 +876,12 @@ impl SourceOrderVisitor<'_> for SemanticTokenVisitor<'_> {
                 self.visit_expr(&named.value);
             }
             ast::Expr::StringLiteral(string_expr) => {
-                if ExprRef::from(expr).is_string_annotation(self.semantic_model) {
-                    let source = source_text(self.semantic_model.db(), self.semantic_model.file());
-                    if let Some(string_literal) = string_expr.as_single_part_string()
-                        && let Ok(sub_ast) = ruff_python_parser::parse_string_annotation(
-                            source.as_str(),
-                            string_literal,
-                        )
-                    {
-                        let sub_model = self.semantic_model.with_string_annotation(expr);
-                        let mut sub_visitor = SemanticTokenVisitor::new(&sub_model, None);
-                        sub_visitor.visit_expr(sub_ast.expr());
-                        self.tokens.extend(sub_visitor.tokens);
-                    }
+                if let Some((sub_ast, sub_model)) =
+                    self.semantic_model.enter_string_annotation(string_expr)
+                {
+                    let mut sub_visitor = SemanticTokenVisitor::new(&sub_model, None);
+                    sub_visitor.visit_expr(sub_ast.expr());
+                    self.tokens.extend(sub_visitor.tokens);
                 } else {
                     walk_expr(self, expr);
                 }
