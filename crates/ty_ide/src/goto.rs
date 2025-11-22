@@ -393,15 +393,20 @@ impl GotoTarget<'_> {
             GotoTarget::Expression(expression) => {
                 definitions_for_expression(model, expression).map(DefinitionsOrTargets::Definitions)
             }
+            // For already-defined symbols, they are their own definitions
             GotoTarget::FunctionDef(function) => Some(DefinitionsOrTargets::Definitions(vec![
                 ResolvedDefinition::Definition(function.definition(model)),
             ])),
+
             GotoTarget::ClassDef(class) => Some(DefinitionsOrTargets::Definitions(vec![
                 ResolvedDefinition::Definition(class.definition(model)),
             ])),
+
             GotoTarget::Parameter(parameter) => Some(DefinitionsOrTargets::Definitions(vec![
                 ResolvedDefinition::Definition(parameter.definition(model)),
             ])),
+
+            // For import aliases (offset within 'y' or 'z' in "from x import y as z")
             GotoTarget::ImportSymbolAlias {
                 alias, import_from, ..
             } => {
@@ -415,6 +420,7 @@ impl GotoTarget<'_> {
                     ),
                 ))
             }
+
             GotoTarget::ImportModuleComponent {
                 module_name,
                 component_index,
@@ -425,6 +431,8 @@ impl GotoTarget<'_> {
                 let module = import_name(module_name, *component_index);
                 definitions_for_module(model, Some(module), *level)
             }
+
+            // Handle import aliases (offset within 'z' in "import x.y as z")
             GotoTarget::ImportModuleAlias { alias } => {
                 if alias_resolution == ImportAliasResolution::ResolveAliases {
                     definitions_for_module(model, Some(alias.name.as_str()), 0)
@@ -439,17 +447,23 @@ impl GotoTarget<'_> {
                     ))
                 }
             }
+
+            // Handle keyword arguments in call expressions
             GotoTarget::KeywordArgument {
                 keyword,
                 call_expression,
             } => Some(DefinitionsOrTargets::Definitions(
                 definitions_for_keyword_argument(model, keyword, call_expression),
             )),
+
+            // For exception variables, they are their own definitions (like parameters)
             GotoTarget::ExceptVariable(except_handler) => {
                 Some(DefinitionsOrTargets::Definitions(vec![
                     ResolvedDefinition::Definition(except_handler.definition(model)),
                 ]))
             }
+
+            // For pattern match rest variables, they are their own definitions
             GotoTarget::PatternMatchRest(pattern_mapping) => {
                 if let Some(rest_name) = &pattern_mapping.rest {
                     let range = rest_name.range;
@@ -463,6 +477,8 @@ impl GotoTarget<'_> {
                     None
                 }
             }
+
+            // For pattern match as names, they are their own definitions
             GotoTarget::PatternMatchAsName(pattern_as) => {
                 if let Some(name) = &pattern_as.name {
                     let range = name.range;
@@ -476,6 +492,10 @@ impl GotoTarget<'_> {
                     None
                 }
             }
+
+            // For callables, both the definition of the callable and the actual function impl are relevant.
+            //
+            // Prefer the function impl over the callable so that its docstrings win if defined.
             GotoTarget::Call { callable, call } => {
                 let mut definitions = definitions_for_callable(model, call);
                 let expr_definitions =
@@ -488,18 +508,22 @@ impl GotoTarget<'_> {
                     Some(DefinitionsOrTargets::Definitions(definitions))
                 }
             }
+
             GotoTarget::BinOp { expression, .. } => {
                 let (definitions, _) =
                     ty_python_semantic::definitions_for_bin_op(model, expression)?;
 
                 Some(DefinitionsOrTargets::Definitions(definitions))
             }
+
             GotoTarget::UnaryOp { expression, .. } => {
                 let (definitions, _) =
                     ty_python_semantic::definitions_for_unary_op(model, expression)?;
 
                 Some(DefinitionsOrTargets::Definitions(definitions))
             }
+
+            // String annotations sub-expressions require us to recurse into the sub-AST
             GotoTarget::StringAnnotationSubexpr {
                 string_expr,
                 subrange,
@@ -512,6 +536,8 @@ impl GotoTarget<'_> {
                 definitions_for_expression(&submodel, &subexpr)
                     .map(DefinitionsOrTargets::Definitions)
             }
+
+            // TODO: implement these
             GotoTarget::PatternKeywordArgument(..)
             | GotoTarget::PatternMatchStarName(..)
             | GotoTarget::TypeParamTypeVarName(..)

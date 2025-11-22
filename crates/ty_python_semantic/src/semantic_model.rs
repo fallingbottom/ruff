@@ -261,8 +261,17 @@ impl<'db> SemanticModel<'db> {
         &self,
         string_expr: &ExprStringLiteral,
     ) -> Option<(Parsed<ModExpression>, Self)> {
-        // Must be a string annotation
-        if !ExprRef::StringLiteral(string_expr).is_string_annotation(self) {
+        // String annotations can't contain string annotations
+        if self.in_string_annotation_expr.is_some() {
+            return None;
+        }
+
+        // Ask the inference engine whether this is actually a string annotation
+        let expr = ExprRef::StringLiteral(string_expr);
+        let index = semantic_index(self.db, self.file);
+        let file_scope = index.expression_scope_id(&expr);
+        let scope = file_scope.to_scope_id(self.db, self.file);
+        if !infer_scope_types(self.db, scope).is_string_annotation(expr) {
             return None;
         }
 
@@ -359,14 +368,6 @@ pub trait HasType {
     fn inferred_type<'db>(&self, model: &SemanticModel<'db>) -> Type<'db>;
 }
 
-pub trait IsStringAnnotation {
-    /// Returns the inferred type of `self`.
-    ///
-    /// ## Panics
-    /// May panic if `self` is from another file than `model`.
-    fn is_string_annotation(&self, model: &SemanticModel) -> bool;
-}
-
 pub trait HasDefinition {
     /// Returns the inferred type of `self`.
     ///
@@ -382,19 +383,6 @@ impl HasType for ast::ExprRef<'_> {
         let scope = file_scope.to_scope_id(model.db, model.file);
 
         infer_scope_types(model.db, scope).expression_type(*self)
-    }
-}
-
-impl IsStringAnnotation for ast::ExprRef<'_> {
-    fn is_string_annotation(&self, model: &SemanticModel) -> bool {
-        if model.in_string_annotation_expr.is_some() {
-            return false;
-        }
-        let index = semantic_index(model.db, model.file);
-        let file_scope = index.expression_scope_id(self);
-        let scope = file_scope.to_scope_id(model.db, model.file);
-
-        infer_scope_types(model.db, scope).is_string_annotation(*self)
     }
 }
 
